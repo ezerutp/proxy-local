@@ -6,6 +6,7 @@ import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import Sequence
 
 from .config import (
@@ -175,8 +176,7 @@ def enable_proxy(proxy_id: str, unsafe: bool) -> int:
     ensure_no_active_origin_conflict(proxy, proxies, state)
     ensure_port_available(proxy)
     process = start_background_proxy(proxy)
-    time.sleep(0.35)
-    if process.poll() is not None:
+    if not wait_for_proxy_start(proxy, process):
         raise RedirectError(
             f"Proxy '{proxy.id}' failed to start. Check the log at {log_path(proxy.id)}."
         )
@@ -286,12 +286,38 @@ def start_background_proxy(proxy: ProxyConfig) -> subprocess.Popen:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("ab") as log_file:
         return subprocess.Popen(
-            [sys.executable, "-m", "redirect.cli", "--serve", proxy.id],
+            background_proxy_command(proxy.id),
             stdin=subprocess.DEVNULL,
             stdout=log_file,
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
+
+
+def wait_for_proxy_start(
+    proxy: ProxyConfig,
+    process: subprocess.Popen,
+    timeout_seconds: float = 5,
+) -> bool:
+    host, port = origin_host_port(proxy.origin)
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        if process.poll() is not None:
+            return False
+        try:
+            if is_port_in_use(host, port):
+                return True
+        except OSError:
+            return False
+        time.sleep(0.1)
+    return False
+
+
+def background_proxy_command(proxy_id: str) -> list[str]:
+    executable_name = Path(sys.executable).name.lower()
+    if executable_name.startswith("python"):
+        return [sys.executable, "-m", "redirect.cli", "--serve", proxy_id]
+    return [sys.executable, "--serve", proxy_id]
 
 
 def cleanup_dead_processes(proxies: list[ProxyConfig], state: dict) -> bool:
