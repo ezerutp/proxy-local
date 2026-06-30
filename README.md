@@ -44,6 +44,30 @@ se reenvia como:
 GET https://api.ejemplo.xyz/users?page=1
 ```
 
+## Referencia de comandos
+
+| Comando | Argumentos | Que hace |
+| --- | --- | --- |
+| `redirect --help` | ninguno | Muestra la ayuda del CLI y las opciones disponibles. |
+| `redirect --set ...` | `id`, `origin`, `destination` | Guarda un proxy persistido e inactivo en `~/.redirect/config.json`. |
+| `redirect -t ...` / `redirect --temp ...` | `origin`, `destination`, opcional `--unsafe` | Levanta un proxy temporal en primer plano sin guardarlo en la configuracion. |
+| `redirect -l` / `redirect --list` | ninguno | Lista los proxies configurados y muestra si estan activos o inactivos. |
+| `redirect -e ID` / `redirect --enable ID` | `ID`, opcional `--unsafe` | Levanta el proxy persistido indicado. Si otro proxy usa el mismo `origin`, pide confirmacion para switchear. |
+| `redirect -d ID` / `redirect --disable ID` | `ID` | Detiene el proxy indicado y lo marca como inactivo. |
+| `redirect -r ID` / `redirect --remove ID` | `ID` | Elimina el proxy indicado de la configuracion. Si esta activo, lo detiene primero. |
+| `redirect --delete ID` | `ID` | Alias de compatibilidad para `--remove`; no aparece en `--help`. |
+| `redirect --serve ID` | `ID` | Comando interno usado por `redirect` para ejecutar el proceso del proxy. No se usa manualmente. |
+
+## Argumentos
+
+| Argumento | Uso | Descripcion corta |
+| --- | --- | --- |
+| `ID` | `-e`, `-d`, `-r`, `--enable`, `--disable`, `--remove` | Identificador del proxy guardado, por ejemplo `qa-api`. No puede estar vacio ni contener espacios. |
+| `id=...` | `--set` | ID que tendra el proxy persistido nuevo. Debe ser unico. |
+| `origin=...` | `--set`, `--temp` | URL local donde escucha el proxy. Debe ser `http` o `https` e incluir host y puerto, por ejemplo `http://localhost:8080`. |
+| `destination=...` | `--set`, `--temp` | URL remota hacia la que se reenvian las peticiones. Debe ser `http` o `https`. |
+| `--unsafe` | `--enable`, `--temp` | Permite todos los metodos HTTP. Sin esta opcion, solo pasan `GET`, `HEAD` y `OPTIONS`. |
+
 ## Proxies persistidos
 
 Los proxies configurados se guardan en:
@@ -59,6 +83,8 @@ redirect --set id=qa-api origin=http://localhost:8080 destination=https://api.ej
 ```
 
 El proxy se guarda con `enabled: false` y no se levanta automaticamente.
+Puedes guardar mas de un proxy con el mismo `origin`. Como todos se crean
+inactivos, no chocan hasta que intentes levantar uno.
 
 Listar proxies:
 
@@ -77,17 +103,35 @@ redirect --enable qa-api
 Deshabilitar y detener un proxy:
 
 ```bash
+redirect -d qa-api
 redirect --disable qa-api
 ```
 
 Eliminar un proxy:
 
 ```bash
-redirect -d qa-api
-redirect --delete qa-api
+redirect -r qa-api
+redirect --remove qa-api
 ```
 
-Si el proxy esta activo, `--delete` lo detiene antes de removerlo de la configuracion.
+Si el proxy esta activo, `--remove` lo detiene antes de removerlo de la configuracion.
+
+## Cambiar entre proxies con el mismo origin
+
+Solo puede haber un proxy activo por `origin`, porque ambos intentarian escuchar
+en el mismo host y puerto. Si habilitas un proxy cuyo `origin` ya esta activo en
+otro proxy, `redirect` muestra cual esta usando ese `origin` y pide confirmacion
+antes de hacer el cambio:
+
+```txt
+Origin http://localhost:8080 is already active on proxy 'qa-api':
+  current: https://qa-api.ejemplo.xyz
+  new:     https://staging-api.ejemplo.xyz
+Disable 'qa-api' and enable 'staging-api' instead? [y/N]
+```
+
+Si respondes `y`, el proxy activo se deshabilita y se levanta el nuevo. Si
+respondes cualquier otra cosa, no se cambia nada.
 
 ## Proxies temporales
 
@@ -148,10 +192,13 @@ redirect -t origin=http://localhost:8080 destination=https://api.ejemplo.xyz --u
 El proxy agrega estos headers para facilitar pruebas desde frontends locales:
 
 ```txt
-Access-Control-Allow-Origin: *
+Access-Control-Allow-Origin: <Origin de la peticion, o * si no hay Origin>
 Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
-Access-Control-Allow-Headers: *
+Access-Control-Allow-Headers: <Access-Control-Request-Headers, o *>
+Access-Control-Allow-Credentials: true
 ```
+
+Cuando la peticion trae `Origin`, tambien agrega `Vary: Origin`.
 
 ## Validaciones
 
@@ -162,7 +209,8 @@ Access-Control-Allow-Headers: *
 - `origin` sea una URL `http` o `https` con host y puerto
 - `destination` sea una URL `http` o `https`
 - no se habilite un proxy si el puerto del `origin` esta ocupado
-- no haya dos proxies activos usando el mismo origin
+- si ya hay un proxy activo con el mismo `origin`, se confirme el cambio antes
+  de deshabilitar el anterior y levantar el nuevo
 
 ## Ejemplo completo
 
@@ -171,8 +219,8 @@ redirect --set id=qa-api origin=http://localhost:8080 destination=https://api.ej
 redirect -l
 redirect -e qa-api
 curl http://localhost:8080/users?page=1
-redirect --disable qa-api
 redirect -d qa-api
+redirect -r qa-api
 ```
 
 ## Pruebas

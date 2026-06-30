@@ -45,8 +45,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return enable_proxy(args.enable, args.unsafe)
         if args.disable:
             return disable_proxy(args.disable)
-        if args.delete:
-            return delete_proxy(args.delete)
+        if args.remove:
+            return remove_proxy(args.remove)
         parser.print_help()
         return 0
     except RedirectError as error:
@@ -64,8 +64,9 @@ def build_parser() -> argparse.ArgumentParser:
     actions.add_argument("-t", "--temp", dest="temp_values", nargs="+", metavar="key=value")
     actions.add_argument("-l", "--list", action="store_true")
     actions.add_argument("-e", "--enable", metavar="ID")
-    actions.add_argument("--disable", metavar="ID")
-    actions.add_argument("-d", "--delete", metavar="ID")
+    actions.add_argument("-d", "--disable", metavar="ID")
+    actions.add_argument("-r", "--remove", dest="remove", metavar="ID")
+    actions.add_argument("--delete", dest="remove", metavar="ID", help=argparse.SUPPRESS)
     actions.add_argument("--serve", metavar="ID", help=argparse.SUPPRESS)
     parser.add_argument(
         "--unsafe",
@@ -161,7 +162,7 @@ def enable_proxy(proxy_id: str, unsafe: bool) -> int:
     proxy_id = validate_id(proxy_id)
     proxies = load_proxies()
     state = load_state()
-    cleanup_dead_processes(proxies, state)
+    changed = cleanup_dead_processes(proxies, state)
     proxy = find_proxy(proxies, proxy_id)
 
     if is_proxy_running(state, proxy.id):
@@ -172,8 +173,17 @@ def enable_proxy(proxy_id: str, unsafe: bool) -> int:
             return 0
         stop_process(state, proxy.id)
 
+    active_same_origin = find_active_origin_proxy(proxy, proxies, state)
+    if active_same_origin is not None:
+        if not confirm_origin_switch(active_same_origin, proxy):
+            if changed:
+                save_proxies(proxies)
+                save_state(state)
+            print("Switch cancelled.")
+            return 0
+        stop_process(state, active_same_origin.id)
+        active_same_origin.enabled = False
     proxy.unsafe = unsafe
-    ensure_no_active_origin_conflict(proxy, proxies, state)
     ensure_port_available(proxy)
     process = start_background_proxy(proxy)
     if not wait_for_proxy_start(proxy, process):
@@ -211,6 +221,10 @@ def disable_proxy(proxy_id: str) -> int:
 
 
 def delete_proxy(proxy_id: str) -> int:
+    return remove_proxy(proxy_id)
+
+
+def remove_proxy(proxy_id: str) -> int:
     proxy_id = validate_id(proxy_id)
     proxies = load_proxies()
     state = load_state()
@@ -220,7 +234,7 @@ def delete_proxy(proxy_id: str) -> int:
     remaining = [item for item in proxies if item.id != proxy.id]
     save_proxies(remaining)
     save_state(state)
-    print(f"Proxy '{proxy.id}' deleted.")
+    print(f"Proxy '{proxy.id}' removed.")
     return 0
 
 
@@ -250,21 +264,32 @@ def required(options: dict[str, str], key: str) -> str:
         raise RedirectError(f"Missing required option '{key}'.") from error
 
 
-def ensure_no_active_origin_conflict(
+def find_active_origin_proxy(
     candidate: ProxyConfig,
     proxies: list[ProxyConfig],
     state: dict,
-) -> None:
+) -> ProxyConfig | None:
     candidate_host, candidate_port = origin_host_port(candidate.origin)
     for proxy in proxies:
         if proxy.id == candidate.id or not is_proxy_running(state, proxy.id):
             continue
         host, port = origin_host_port(proxy.origin)
         if host == candidate_host and port == candidate_port:
-            raise RedirectError(
-                f"Cannot enable proxy '{candidate.id}' because origin {candidate.origin} "
-                f"is already used by active proxy '{proxy.id}'."
-            )
+            return proxy
+    return None
+
+
+def confirm_origin_switch(active_proxy: ProxyConfig, candidate: ProxyConfig) -> bool:
+    print(f"Origin {candidate.origin} is already active on proxy '{active_proxy.id}':")
+    print(f"  current: {active_proxy.destination}")
+    print(f"  new:     {candidate.destination}")
+    try:
+        answer = input(
+            f"Disable '{active_proxy.id}' and enable '{candidate.id}' instead? [y/N] "
+        )
+    except EOFError:
+        return False
+    return answer.strip().lower() in {"y", "yes"}
 
 
 def ensure_port_available(proxy: ProxyConfig) -> None:
