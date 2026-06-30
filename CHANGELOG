@@ -1,0 +1,4 @@
+* Tue Jun 30 2026 redirect contributors <redirect@example.com> - 0.1.0-1
+- Initial release of the redirect CLI.
+- Added persistent and temporary local HTTP proxies.
+- Added safe mode, unsafe mode, CORS headers and process management commands.

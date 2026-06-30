@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "redirect"
+version = "0.1.0"
+description = "Configurable local HTTP proxies for redirecting local origins to remote APIs."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+  { name = "redirect contributors" }
+]
+
+[project.scripts]
+redirect = "redirect.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["redirect*"]
+
+[tool.briefcase]
+project_name = "redirect"
+bundle = "dev.local"
+version = "0.1.0"
+license = "MIT"
+
+[tool.briefcase.app.redirect]
+formal_name = "redirect"
+description = "Configurable local HTTP proxy CLI."
+long_description = "redirect is a Python CLI that manages configurable local HTTP proxies for redirecting frontend requests from local origins to remote APIs."
+sources = ["redirect"]
+console_app = true
+requires = []
